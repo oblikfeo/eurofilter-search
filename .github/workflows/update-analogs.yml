@@ -1,0 +1,42 @@
+name: Обновить базу аналогов
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-analogs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Собрать базу
+        run: python scripts/build_index.py
+
+      - name: Сохранить, если что-то изменилось
+        run: |
+          git config user.name  "analogs-bot"
+          git config user.email "analogs-bot@users.noreply.github.com"
+          git add docs/analogs.json docs/report.txt
+          if git diff --cached --quiet -- docs/analogs.json; then
+            echo "Изменений нет"; exit 0
+          fi
+          if python -c "import json,subprocess,sys;o=json.loads(subprocess.check_output(['git','show','HEAD:docs/analogs.json']));n=json.load(open('docs/analogs.json',encoding='utf-8'));o.pop('updated',0);n.pop('updated',0);sys.exit(0 if o!=n else 1)"; then
+            git commit -m "Обновление базы аналогов"
+            git push
+          else
+            echo "Данные не изменились"
+          fi

@@ -1,0 +1,296 @@
+<style>
+  .efs-overlay{--efs-bg:#101217;--efs-fg:#f5f4f1;--efs-card:#1d1f29;--efs-muted:#888888;--efs-line:#373b49;--efs-accent:#eae7df;
+    position:fixed;inset:0;z-index:999999;background:rgba(16,18,23,.97);color:var(--efs-fg);
+    font-family:'Inter Tight',Arial,sans-serif;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .efs-overlay.efs-open{display:block}
+  .efs-wrap{max-width:860px;margin:0 auto;padding:72px 20px 40px;box-sizing:border-box}
+  .efs-close{position:fixed;top:18px;right:18px;width:44px;height:44px;border:0;background:transparent;color:var(--efs-fg);
+    font-size:34px;line-height:44px;cursor:pointer;padding:0}
+  .efs-close:hover{opacity:.7}
+  .efs-title{font-size:15px;color:var(--efs-muted);margin:0 0 14px;font-weight:400}
+  .efs-field{position:relative}
+  .efs-input{width:100%;box-sizing:border-box;height:62px;padding:0 54px 0 22px;font:500 22px/1 'Inter Tight',Arial,sans-serif;
+    color:var(--efs-bg);background:var(--efs-fg);border:0;border-radius:5px;outline:none;-webkit-appearance:none}
+  .efs-input::placeholder{color:#9a9a9a;font-weight:400}
+  .efs-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;background:transparent;
+    color:#6a6a6a;font-size:26px;cursor:pointer;display:none}
+  .efs-hint{font-size:13px;color:var(--efs-muted);margin:10px 2px 0}
+  .efs-status{margin:26px 2px 10px;font-size:14px;color:var(--efs-muted)}
+  .efs-list{list-style:none;margin:0;padding:0}
+  .efs-item{margin:0 0 10px}
+  .efs-link{display:flex;gap:16px;align-items:center;padding:12px 16px 12px 12px;background:var(--efs-card);border-radius:5px;
+    color:var(--efs-fg)!important;text-decoration:none!important;border:1px solid transparent;transition:border-color .15s}
+  .efs-link:hover,.efs-item.efs-active .efs-link{border-color:var(--efs-accent)}
+  .efs-img{flex:0 0 72px;height:72px;border-radius:5px;background:#f5f4f1 center/contain no-repeat}
+  .efs-body{min-width:0;flex:1}
+  .efs-name{font-size:17px;font-weight:600;margin:0 0 4px}
+  .efs-match{font-size:14px;color:#c9c7c0;line-height:1.45;word-break:break-word}
+  .efs-match b{color:var(--efs-fg);font-weight:600}
+  .efs-match mark{background:var(--efs-accent);color:var(--efs-bg);border-radius:2px;padding:0 1px}
+  .efs-more{color:var(--efs-muted)}
+  .efs-arrow{flex:0 0 auto;font-size:22px;color:var(--efs-muted)}
+  .efs-empty{background:var(--efs-card);border-radius:5px;padding:22px;font-size:16px;line-height:1.5}
+  .efs-empty a{color:var(--efs-accent)!important;text-decoration:underline!important}
+  @media (max-width:640px){
+    .efs-wrap{padding:64px 16px 30px}
+    .efs-input{height:54px;font-size:18px;padding-left:16px}
+    .efs-img{flex-basis:56px;height:56px}
+    .efs-name{font-size:15px}
+    .efs-match{font-size:13px}
+    .efs-arrow{display:none}
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  var DATA_URL = 'https://oblikfeo.github.io/eurofilter-search/analogs.json';
+  var MAX_RESULTS = 20;
+  var MAX_MATCHES_SHOWN = 3;
+  var REQUEST_LINK = '#popup:podbor';
+
+  if (window.__efsLoaded) return;
+  window.__efsLoaded = true;
+
+  var data = null, loading = null, keys = null;
+  var overlay, input, clearBtn, statusEl, listEl, activeIndex = -1, lastResults = [];
+
+  var CYR = { 'А':'A','В':'B','Е':'E','К':'K','М':'M','Н':'H','О':'O','Р':'P','С':'C','Т':'T','Х':'X','У':'Y' };
+  function norm(s) {
+    s = String(s || '').toUpperCase().replace(/[АВЕКМНОРСТХУ]/g, function (c) { return CYR[c]; });
+    return s.replace(/[^0-9A-ZА-ЯЁ]/g, '');
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function highlight(text, q) {
+    if (!q) return esc(text);
+    var map = [], n = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = norm(text[i]);
+      if (c) { n += c; map.push(i); }
+    }
+    var at = n.indexOf(q);
+    if (at < 0) return esc(text);
+    var s = map[at], e = map[at + q.length - 1] + 1;
+    return esc(text.slice(0, s)) + '<mark>' + esc(text.slice(s, e)) + '</mark>' + esc(text.slice(e));
+  }
+
+  function load() {
+    if (data) return Promise.resolve(data);
+    if (loading) return loading;
+    loading = fetch(DATA_URL, { cache: 'default' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        data = d;
+        keys = d.analogs.map(function (e) { return norm(e[1]); });
+        d.products.forEach(function (p) {
+          p._sku = norm(p.sku);
+          p._title = String(p.title || '').toLowerCase();
+          p._titleN = norm(p.title);
+        });
+        return d;
+      })
+      .catch(function (err) { loading = null; throw err; });
+    return loading;
+  }
+
+  function score(key, q) {
+    if (key === q) return 3;
+    if (key.indexOf(q) === 0) return 2;
+    if (q.length >= 3 && key.indexOf(q) > 0) return 1;
+    return 0;
+  }
+
+  function search(raw) {
+    var q = norm(raw);
+    var words = String(raw).toLowerCase().split(/\s+/).filter(function (w) { return w.length > 1; });
+    if (q.length < 2) return [];
+    var byProduct = {};
+    function hit(pi, sc, match) {
+      var r = byProduct[pi] || (byProduct[pi] = { pi: pi, score: 0, own: false, matches: [], total: 0 });
+      if (match) {
+        r.total++;
+        r.matches.push({ m: match, s: sc });
+      } else {
+        r.own = true;
+      }
+      if (sc > r.score) r.score = sc;
+    }
+
+    data.products.forEach(function (p, pi) {
+      var s = Math.max(score(p._sku, q), p._titleN.indexOf(q) >= 0 && q.length >= 3 ? 1 : 0);
+      if (!s && words.length && words.every(function (w) { return p._title.indexOf(w) >= 0; })) s = 1;
+      if (s) hit(pi, s + 1, null);
+    });
+
+    for (var i = 0; i < keys.length; i++) {
+      var s = score(keys[i], q);
+      if (s) hit(data.analogs[i][2], s, data.analogs[i]);
+    }
+
+    var list = Object.keys(byProduct).map(function (k) { return byProduct[k]; });
+    list.forEach(function (r) { r.matches.sort(function (a, b) { return b.s - a.s; }); });
+    list.sort(function (a, b) {
+      return b.score - a.score || (b.matches[0] ? b.matches[0].s : 0) - (a.matches[0] ? a.matches[0].s : 0) ||
+        String(data.products[a.pi].sku).localeCompare(data.products[b.pi].sku);
+    });
+    return list.slice(0, MAX_RESULTS);
+  }
+
+  function render(raw) {
+    var q = norm(raw);
+    activeIndex = -1;
+    clearBtn.style.display = raw ? 'block' : 'none';
+    if (q.length < 2) {
+      statusEl.textContent = '';
+      listEl.innerHTML = '';
+      lastResults = [];
+      return;
+    }
+    var res = search(raw);
+    lastResults = res;
+    if (!res.length) {
+      statusEl.textContent = '';
+      listEl.innerHTML = '<li class="efs-empty">По запросу <b>' + esc(raw) + '</b> ничего не нашлось.<br>' +
+        'Оставьте заявку, и менеджер подберёт аналог по OEM-номеру: <a href="' + esc(REQUEST_LINK) +
+        '" data-efs-close>оставить заявку</a></li>';
+      return;
+    }
+    statusEl.textContent = 'Найдено товаров: ' + res.length + (res.length === MAX_RESULTS ? '+' : '');
+    listEl.innerHTML = res.map(function (r) {
+      var p = data.products[r.pi];
+      var lines = r.matches.slice(0, MAX_MATCHES_SHOWN).map(function (x) {
+        var e = x.m, brand = data.brands[e[0]];
+        return 'Аналог: <b>' + esc(brand ? brand + ' ' : '') + '</b>' + highlight(e[1], q) +
+          (e[3] ? ' <span class="efs-more">(для ' + esc(e[3]) + ')</span>' : '');
+      });
+      if (r.total > MAX_MATCHES_SHOWN) lines.push('<span class="efs-more">и ещё совпадений: ' + (r.total - MAX_MATCHES_SHOWN) + '</span>');
+      if (r.own || !lines.length) lines.unshift('Артикул EUROFILTER: <b>' + highlight(p.sku, q) + '</b>');
+      return '<li class="efs-item"><a class="efs-link" href="' + esc(p.url) + '">' +
+        '<span class="efs-img"' + (p.img ? ' style="background-image:url(\'' + esc(p.img) + '\')"' : '') + '></span>' +
+        '<span class="efs-body"><div class="efs-name">' + esc(p.title || p.sku) + '</div>' +
+        '<div class="efs-match">' + lines.join('<br>') + '</div></span>' +
+        '<span class="efs-arrow">→</span></a></li>';
+    }).join('');
+  }
+
+  var timer;
+  function onInput() {
+    clearTimeout(timer);
+    var v = input.value;
+    timer = setTimeout(function () {
+      if (data) return render(v);
+      statusEl.textContent = 'Загружаем базу аналогов…';
+      load().then(function () { render(input.value); }, function () {
+        statusEl.textContent = 'Не удалось загрузить базу аналогов. Обновите страницу или попробуйте позже.';
+      });
+    }, 120);
+  }
+
+  function setActive(i) {
+    var items = listEl.querySelectorAll('.efs-item');
+    if (!items.length) return;
+    activeIndex = (i + items.length) % items.length;
+    items.forEach(function (el, k) { el.classList.toggle('efs-active', k === activeIndex); });
+    items[activeIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function build() {
+    overlay = document.createElement('div');
+    overlay.className = 'efs-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Поиск по артикулу');
+    overlay.innerHTML =
+      '<button type="button" class="efs-close" aria-label="Закрыть">×</button>' +
+      '<div class="efs-wrap">' +
+        '<p class="efs-title">Поиск по артикулу EUROFILTER или артикулу аналога (Fleetguard, Donaldson, Mann, OEM…)</p>' +
+        '<div class="efs-field">' +
+          '<input class="efs-input" type="search" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="Например, P556245 или FF167">' +
+          '<button type="button" class="efs-clear" aria-label="Очистить">×</button>' +
+        '</div>' +
+        '<p class="efs-hint">Пробелы, дефисы и регистр не важны</p>' +
+        '<div class="efs-status" aria-live="polite"></div>' +
+        '<ul class="efs-list"></ul>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    input = overlay.querySelector('.efs-input');
+    clearBtn = overlay.querySelector('.efs-clear');
+    statusEl = overlay.querySelector('.efs-status');
+    listEl = overlay.querySelector('.efs-list');
+
+    input.addEventListener('input', onInput);
+    clearBtn.addEventListener('click', function () { input.value = ''; render(''); input.focus(); });
+    overlay.querySelector('.efs-close').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay || e.target.classList.contains('efs-wrap')) close();
+      if (e.target.closest('[data-efs-close]')) close();
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(activeIndex + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(activeIndex - 1); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        var links = listEl.querySelectorAll('.efs-link');
+        var target = links[activeIndex >= 0 ? activeIndex : 0];
+        if (target) window.location.href = target.getAttribute('href');
+      }
+    });
+  }
+
+  var prevOverflow = '';
+  function open(prefill) {
+    if (!overlay) build();
+    overlay.classList.add('efs-open');
+    prevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    if (typeof prefill === 'string') input.value = prefill;
+    setTimeout(function () { input.focus(); }, 30);
+    load().then(function () { if (input.value) render(input.value); }, function () {});
+  }
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('efs-open');
+    document.documentElement.style.overflow = prevOverflow;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && overlay && overlay.classList.contains('efs-open')) close();
+  });
+
+  var TRIGGERS = 'a[href="#opensearch"], a[href$="#opensearch"], .t985__search-widget-button, [data-efs-open]';
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest && e.target.closest(TRIGGERS);
+    if (!t) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    open();
+  }, true);
+
+  document.addEventListener('submit', function (e) {
+    var f = e.target.closest && e.target.closest('[data-efs-inline]');
+    if (!f) return;
+    e.preventDefault();
+    var i = f.querySelector('input');
+    open(i ? i.value : '');
+    onInput();
+  }, true);
+
+  try {
+    var qp = new URLSearchParams(location.search).get('search');
+    if (qp) {
+      var go = function () { open(qp); onInput(); };
+      document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', go) : go();
+    }
+  } catch (err) {}
+
+  var idle = window.requestIdleCallback || function (fn) { setTimeout(fn, 2500); };
+  window.addEventListener('load', function () { idle(function () { load().catch(function () {}); }); });
+
+  window.EFSearch = { open: open, close: close, load: load, search: search };
+})();
+</script>
