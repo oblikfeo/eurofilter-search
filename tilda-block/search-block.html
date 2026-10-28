@@ -11,6 +11,7 @@
   .efs-field{position:relative}
   .efs-input{width:100%;box-sizing:border-box;height:62px;padding:0 54px 0 22px;font:500 22px/1 'Inter Tight',Arial,sans-serif;
     color:var(--efs-bg);background:var(--efs-fg);border:0;border-radius:5px;outline:none;-webkit-appearance:none}
+  .efs-input::-webkit-search-cancel-button,.efs-input::-webkit-search-decoration{-webkit-appearance:none;display:none}
   .efs-input::placeholder{color:#9a9a9a;font-weight:400}
   .efs-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;background:transparent;
     color:#6a6a6a;font-size:26px;cursor:pointer;display:none}
@@ -245,10 +246,13 @@
   var prevOverflow = '';
   function open(prefill) {
     if (!overlay) build();
+    if (!overlay.classList.contains('efs-open')) {
+      prevOverflow = document.documentElement.style.overflow;
+      document.documentElement.style.overflow = 'hidden';
+    }
     overlay.classList.add('efs-open');
-    prevOverflow = document.documentElement.style.overflow;
-    document.documentElement.style.overflow = 'hidden';
     if (typeof prefill === 'string') input.value = prefill;
+    input.focus();
     setTimeout(function () { input.focus(); }, 30);
     load().then(function () { if (input.value) render(input.value); }, function () {});
   }
@@ -261,23 +265,60 @@
     if (e.key === 'Escape' && overlay && overlay.classList.contains('efs-open')) close();
   });
 
-  var TRIGGERS = 'a[href="#opensearch"], a[href$="#opensearch"], .t985__search-widget-button, [data-efs-open]';
-  document.addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest(TRIGGERS);
-    if (!t) return;
+  var TRIGGERS = 'a[href="#opensearch"], a[href$="#opensearch"], a[href="#analogsearch"], a[href$="#analogsearch"], ' +
+    '.t985__search-widget-button, [data-efs-open]';
+  var FIELD_HINT = /аналог|артикул/i;
+
+  function isField(el) {
+    return el && el.tagName === 'INPUT' && !(overlay && overlay.contains(el)) &&
+      (FIELD_HINT.test(el.getAttribute('placeholder') || '') || (el.closest && el.closest('[data-efs-inline]')));
+  }
+  function fieldNear(el) {
+    var box = el.closest && el.closest('form, .t-form, [data-efs-inline]');
+    if (!box) {
+      box = el.parentElement;
+      for (var up = 0; up < 3 && box && box.querySelectorAll('input').length === 0; up++) box = box.parentElement;
+    }
+    if (!box || box === document.body) return null;
+    var inputs = box.querySelectorAll('input');
+    if (inputs.length > 3) return null;
+    for (var i = 0; i < inputs.length; i++) if (isField(inputs[i])) return inputs[i];
+    return null;
+  }
+  function openFrom(field) {
+    var v = field ? field.value : '';
+    if (field) field.blur();
+    open(v);
+    if (v) onInput();
+  }
+  function stop(e) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    open();
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest || (overlay && overlay.contains(e.target))) return;
+    if (e.target.closest(TRIGGERS)) { stop(e); return open(); }
+    if (isField(e.target)) { stop(e); return openFrom(e.target); }
+    var btn = e.target.closest('button, [type="submit"], a, .t-submit, .tn-atom, img, svg, [role="button"], [class*="search"], [class*="btn"]');
+    var f = btn && fieldNear(btn);
+    if (f) { stop(e); openFrom(f); }
+  }, true);
+
+  document.addEventListener('focusin', function (e) {
+    if (isField(e.target)) openFrom(e.target);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && isField(e.target)) { stop(e); openFrom(e.target); }
   }, true);
 
   document.addEventListener('submit', function (e) {
-    var f = e.target.closest && e.target.closest('[data-efs-inline]');
+    var f = fieldNear(e.target);
     if (!f) return;
-    e.preventDefault();
-    var i = f.querySelector('input');
-    open(i ? i.value : '');
-    onInput();
+    stop(e);
+    openFrom(f);
   }, true);
 
   try {
