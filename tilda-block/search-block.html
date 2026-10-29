@@ -274,12 +274,9 @@
       (FIELD_HINT.test(el.getAttribute('placeholder') || '') || (el.closest && el.closest('[data-efs-inline]')));
   }
   function fieldNear(el) {
-    var box = el.closest && el.closest('form, .t-form, [data-efs-inline]');
-    if (!box) {
-      box = el.parentElement;
-      for (var up = 0; up < 3 && box && box.querySelectorAll('input').length === 0; up++) box = box.parentElement;
-    }
-    if (!box || box === document.body) return null;
+    if (!el.closest || el.closest('.js-search-reset')) return null;
+    var box = el.closest('.js-search-wrap, [data-efs-inline], form, .t-form');
+    if (!box) return null;
     var inputs = box.querySelectorAll('input');
     if (inputs.length > 3) return null;
     for (var i = 0; i < inputs.length; i++) if (isField(inputs[i])) return inputs[i];
